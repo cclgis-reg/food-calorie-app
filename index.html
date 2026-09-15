@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 智慧熱量分析</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "@google/generative-ai": "https://esm.run/@google/generative-ai"
+      }
+    }
+  </script>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 font-sans max-w-md mx-auto">
+  <header class="text-center py-4">
+    <h1 class="text-2xl font-bold text-emerald-600">🔥 AI 智慧熱量分析</h1>
+    <p class="text-xs text-slate-500 mt-1">拍照即刻估算食物熱量與三大營養素</p>
+  </header>
+
+  <!-- API Key 設定區塊 -->
+  <div class="bg-white p-4 rounded-2xl shadow-sm mb-4 border border-slate-100">
+    <label class="block text-xs font-bold text-slate-600 mb-1">Gemini API Key：</label>
+    <input type="password" id="apiKeyInput" placeholder="請貼上您的 API Key" class="w-full text-sm p-2 border rounded-xl mb-2 focus:outline-none focus:border-emerald-500">
+    <button onclick="saveApiKey()" class="w-full bg-slate-800 text-white text-xs py-2 rounded-xl font-bold">儲存 Key 至瀏覽器</button>
+  </div>
+
+  <!-- 上傳與分析區塊 -->
+  <div class="bg-white p-4 rounded-2xl border-2 border-dashed border-emerald-300 text-center shadow-sm">
+    <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden" onchange="handleImage(event)">
+    <label htmlFor="cameraInput" onclick="document.getElementById('cameraInput').click()" class="cursor-pointer block py-6">
+      <div id="previewContainer">
+        <div class="text-emerald-500 text-4xl mb-2">📷</div>
+        <span class="font-semibold text-slate-700 block">點擊拍照或選擇照片</span>
+      </div>
+    </label>
+  </div>
+
+  <button id="analyzeBtn" onclick="analyzeFood()" class="hidden w-full mt-4 bg-emerald-500 text-white font-bold py-3 rounded-xl shadow-lg">
+    開始 AI 分析
+  </button>
+
+  <!-- 分析結果 -->
+  <div id="resultCard" class="hidden mt-4 bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+    <h2 id="foodName" class="text-xl font-bold text-slate-800"></h2>
+    <div class="text-3xl font-black text-emerald-600 my-2"><span id="calories">0</span> <span class="text-xs text-slate-400">kcal</span></div>
+    
+    <div class="grid grid-cols-3 gap-2 my-3 text-center text-xs">
+      <div class="bg-orange-50 p-2 rounded-xl">蛋白質: <b id="protein" class="block text-sm text-orange-600">0g</b></div>
+      <div class="bg-blue-50 p-2 rounded-xl">碳水: <b id="carbs" class="block text-sm text-blue-600">0g</b></div>
+      <div class="bg-amber-50 p-2 rounded-xl">脂肪: <b id="fat" class="block text-sm text-amber-600">0g</b></div>
+    </div>
+    <p id="advice" class="text-xs text-emerald-800 bg-emerald-50 p-3 rounded-xl mt-2"></p>
+  </div>
+
+  <script type="module">
+    import { GoogleGenerativeAI } from "@google/generative-ai";
+
+    let base64Image = "";
+
+    window.saveApiKey = () => {
+      const key = document.getElementById('apiKeyInput').value;
+      if(key) {
+        localStorage.setItem('GEMINI_API_KEY', key);
+        alert('API Key 已安全儲存於您的手機/瀏覽器中！');
+      }
+    };
+
+    // 初始化載入 Key
+    const savedKey = localStorage.getItem('GEMINI_API_KEY');
+    if(savedKey) document.getElementById('apiKeyInput').value = savedKey;
+
+    window.handleImage = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 800;
+          let width = img.width, height = img.height;
+          if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+          canvas.width = width; canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          base64Image = dataUrl.split(',')[1];
+          document.getElementById('previewContainer').innerHTML = `<img src="${dataUrl}" class="max-h-56 mx-auto rounded-xl shadow">`;
+          document.getElementById('analyzeBtn').classList.remove('hidden');
+        }
+      }
+      reader.readAsDataURL(file);
+    };
+
+    window.analyzeFood = async () => {
+      const apiKey = localStorage.getItem('GEMINI_API_KEY');
+      if (!apiKey) return alert('請先輸入並儲存 Gemini API Key！');
+
+      const btn = document.getElementById('analyzeBtn');
+      btn.innerText = 'Gemini 3.5 分析中...';
+      btn.disabled = true;
+
+      try {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+
+        const prompt = `分析這張食物照片，請只以 JSON 格式回傳，格式範例：
+        {"food_name":"名稱","total_calories":350,"protein_g":20,"carbs_g":40,"fat_g":10,"advice":"建議內文"}`;
+
+        const result = await model.generateContent([
+          prompt,
+          { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+        ]);
+
+        const text = result.response.text().replace(/```json|```/g, '').trim();
+        const data = JSON.parse(text);
+
+        document.getElementById('foodName').innerText = data.food_name;
+        document.getElementById('calories').innerText = data.total_calories;
+        document.getElementById('protein').innerText = data.protein_g + 'g';
+        document.getElementById('carbs').innerText = data.carbs_g + 'g';
+        document.getElementById('fat').innerText = data.fat_g + 'g';
+        document.getElementById('advice').innerText = data.advice;
+        document.getElementById('resultCard').classList.remove('hidden');
+      } catch (err) {
+        alert('分析失敗：' + err.message);
+      } finally {
+        btn.innerText = '開始 AI 分析';
+        btn.disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>
